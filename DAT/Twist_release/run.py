@@ -1,17 +1,64 @@
-import os, glob, time, math
+import os, glob, time, math, sys, argparse
 import bpy
 import numpy as np
 from pathlib import Path
 from os.path import join
 
 # -------------------------
-# Paths
+# Argument Parsing
 # -------------------------
-outPath = None
-inFolder = r'D:\Data\DAT_Sim\cloth_twist_release\truncation_1_iter_100_20260105_123906'
+def parse_args():
+    # Blender eats args before "--", so we grab everything after
+    argv = sys.argv
+    if "--" in argv:
+        argv = argv[argv.index("--") + 1:]
+    else:
+        argv = []
+    
+    parser = argparse.ArgumentParser(description="Render npy sequence with Blender")
+    parser.add_argument("--inFolder", type=str, required=True, help="Input folder containing .npy files")
+    parser.add_argument("--outPath", type=str, default=None, help="Output folder for rendered images")
+    parser.add_argument("--gpu", type=int, default=0, help="GPU index to use (default: 0)")
+    parser.add_argument("--numFrames", type=int, default=1000, help="Number of frames to render")
+    parser.add_argument("--stride", type=int, default=1, help="Frame stride")
+    return parser.parse_args(argv)
 
-if outPath is None:
-    outPath = inFolder + "\\Rendering_subdiv"
+args = parse_args()
+
+# -------------------------
+# GPU / OptiX Setup
+# -------------------------
+def setup_optix(gpu_index=0):
+    """Enable OptiX rendering on a specific GPU."""
+    prefs = bpy.context.preferences.addons['cycles'].preferences
+    prefs.compute_device_type = 'OPTIX'
+    prefs.get_devices()  # Refresh device list
+    
+    # Disable all devices first
+    for device in prefs.devices:
+        device.use = False
+    
+    # Enable only the specified GPU
+    gpu_devices = [d for d in prefs.devices if d.type == 'OPTIX']
+    if gpu_index < len(gpu_devices):
+        gpu_devices[gpu_index].use = True
+        print(f"Using OptiX device: {gpu_devices[gpu_index].name}")
+    else:
+        print(f"Warning: GPU index {gpu_index} not found. Available: {len(gpu_devices)}")
+        if gpu_devices:
+            gpu_devices[0].use = True
+    
+    # Set scene to use GPU
+    bpy.context.scene.cycles.device = 'GPU'
+
+# Call setup using GPU from args
+setup_optix(gpu_index=args.gpu)
+
+# -------------------------
+# Paths (from command line args)
+# -------------------------
+inFolder = args.inFolder
+outPath = args.outPath if args.outPath else inFolder + "/Rendering_subdiv"
 os.makedirs(outPath, exist_ok=True)
 
 # your npy folder / pattern
@@ -23,8 +70,8 @@ npy_pattern = join(inFolder, "*.npy")   # adjust if needed
 cam_name = "Camera"
 target_obj_name = "initial_mesh"   # <-- existing mesh object name in the Blender scene
 
-stride = 1
-numFrames = 1000
+stride = args.stride
+numFrames = args.numFrames
 doSubDiv = False
 thickness = 0.003
 
